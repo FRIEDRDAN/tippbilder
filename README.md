@@ -47,11 +47,22 @@ wiederholten Tippen derselben Taste mit der Zeit alle Bilder mal auftauchen.
 
 ## Eigene Zeichnungen einbinden
 
-Wer möchte, kann eigene gescannte oder fotografierte Zeichnungen statt der
-eingebauten Piktogramme verwenden. Details dazu (und alles Weitere zum aktuellen
-Stand, den Konfigurationsmöglichkeiten und der Architektur) stehen im
-technischen Übergabedokument [`UEBERGABE.md`](UEBERGABE.md) – gedacht für alle,
-die den Code lesen oder weiterentwickeln möchten.
+Wer möchte, kann eigene gescannte oder fotografierte Zeichnungen zusätzlich zu
+den eingebauten Piktogrammen verwenden:
+
+1. Eigene Zeichnungen scannen/fotografieren, als PNG oder JPG speichern (am
+   besten mit transparentem Hintergrund).
+2. Die Bilddateien in denselben Ordner wie `tippbilder.html` legen.
+3. `tippbilder.html` in einem Texteditor öffnen und ganz oben im
+   `<script>`-Bereich die Dateinamen eintragen, z. B.:
+   ```js
+   const EIGENE_BILDER = ["katze.png", "haus.png", "oma.jpg"];
+   ```
+   Sollen **nur** eigene Bilder erscheinen (keine eingebauten Piktogramme):
+   direkt darunter `const NUR_EIGENE = true;` setzen.
+
+Wer den Code selbst lesen oder erweitern möchte: `tippbilder.html` ist
+durchgehend kommentiert (Architektur-Überblick ganz oben im `<style>`-Block).
 
 ## Lizenz
 
