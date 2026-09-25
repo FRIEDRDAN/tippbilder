@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Tippbilder – Tastendruck lässt Piktogramme aufblühen.
-  Copyright (c) 2026 [DEIN NAME]
+  Copyright (c) 2026 FRIEDRDAN
   Lizenz: MIT (siehe Datei LICENSE oder https://opensource.org/license/mit)
   SPDX-License-Identifier: MIT
 -->
@@ -11,6 +11,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tippbilder</title>
 <style>
+  /* =====================================================================
+     AUFBAU DIESER DATEI
+     ---------------------------------------------------------------------
+     Alles in einer Datei (kein Build, keine Abhängigkeiten). Grob von oben
+     nach unten:
+       1. CSS für die Piktogramm-"Sprites" (schweben/verschwinden) – wird
+          von ALLEN drei Spielmodi genutzt (Klasse .sprite/.layer).
+       2. CSS für das Start-Overlay (Moduswahl) und die Eltern-Knöpfe.
+       3. CSS je Spielmodus: "E-Mail schreiben" (#emailView), die
+          Sende-Animation (#sendAnim) und "Abenteuer" (#adventureView).
+       4. HTML-Grundgerüst: Start-Overlay, Knöpfe, die drei Modus-Bühnen.
+       5. <script>: zuerst Konfiguration + Bilddaten (PIKTOS, ADV_BAEUME),
+          danach Aufbau-Funktionen, dann die Spawn-Funktionen (erzeugen
+          die Bilder), zuletzt die Event-Listener (Tastatur/Maus/Buttons).
+     Nur EIN Bild-Erzeuger existiert wirklich: spawnPikto() weiter unten.
+     "Frei spielen" und "Abenteuer" rufen ihn nur mit unterschiedlichem
+     Ziel-Container und Höhenbereich auf (spawnSprite / spawnAdventureSprite).
+     "E-Mail schreiben" ist eigenständig (appendEmailIcon), weil dort Bilder
+     NICHT wegschweben, sondern wie Text nebeneinander stehen bleiben.
+     ===================================================================== */
+
   /* ===== Flipchart-Papier als Bühne ===== */
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; }
@@ -23,27 +44,39 @@
     cursor: default;
   }
 
-  /* ===== Piktogramm-Sprites ===== */
+  /* ===== Piktogramm-Sprites =====
+     Jedes gespawnte Bild ist ein <div class="sprite"> mit ZWEI übereinanderliegenden
+     <div class="layer">-Kindern (siehe spawnPikto() im Script): Ebene A zeigt sofort
+     das erste Bild (Klasse "show" = sichtbar+normal groß), Ebene B liegt darunter und
+     bekommt erst später (per JS-Timeout) ebenfalls die Klasse "show". Weil beide Ebenen
+     exakt übereinander liegen (position:absolute; inset:0) und "opacity"+"transform"
+     hier mit "transition" animiert werden, sieht der Klassenwechsel wie eine weiche
+     Überblendung (Crossfade) von Bild A zu Bild B aus – das ist der "Verwandlungs"-Effekt.
+     Die eigentliche Bewegung (schweben, wackeln, verschwinden) läuft NICHT über die
+     .layer-transition, sondern über die vier Keyframe-Animationen unten (v1–v4), die auf
+     dem äußeren .sprite-Element laufen und dessen Gesamt-transform steuern. */
   .sprite {
     position: absolute;
     filter: drop-shadow(4px 5px 0 #D6D2C7); /* bikablo-typischer grauer Schlagschatten */
     animation-duration: 5s;
     animation-timing-function: ease-out;
-    animation-fill-mode: forwards;
+    animation-fill-mode: forwards; /* bleibt im End-Zustand (unsichtbar) stehen, bis JS es per animationend entfernt */
     will-change: transform, opacity;
-    pointer-events: none;
+    pointer-events: none; /* Sprites dürfen keine Klicks/Taps abfangen, sonst würde z.B. Tippen "durch" ein Bild hindurch nicht mehr funktionieren */
   }
   .layer {
     position: absolute; inset: 0;
     opacity: 0;
-    transform: scale(0.55) rotate(7deg);
+    transform: scale(0.55) rotate(7deg); /* Ausgangszustand vor dem Einblenden: klein + leicht gedreht */
     transition: opacity 0.9s ease, transform 0.9s ease;
   }
   .layer.show { opacity: 1; transform: scale(1) rotate(0deg); }
   .layer svg { display: block; width: 100%; height: 100%; }
   .layer img { width: 100%; height: 100%; object-fit: contain; }
 
-  /* Vier Bewegungsvarianten */
+  /* Vier Bewegungsvarianten, zufällig ausgewählt in spawnPikto() (VARIANTEN-Array).
+     Jede definiert nur, WIE sich das .sprite-Element über die 5s (animation-duration
+     oben) bewegt/dreht/verblasst; welches Bild drin steckt ist davon unabhängig. */
   .v1 { animation-name: vUp; }
   .v2 { animation-name: vRight; }
   .v3 { animation-name: vLeft; }
@@ -100,22 +133,260 @@
     text-underline-offset: 8px;
   }
   #start p { color: #55524B; font-size: 1.05rem; max-width: 34rem; line-height: 1.5; }
-  #startBtn {
-    font-family: inherit; font-size: 1.3rem; padding: 14px 34px;
+  .modes { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .startBtn {
+    font-family: inherit; font-size: 1.15rem; padding: 14px 30px;
     background: #FFD43B; color: #2B2B2B; border: 3.5px solid #2B2B2B;
     border-radius: 14px; cursor: pointer;
     box-shadow: 4px 5px 0 #D6D2C7;
   }
-  #startBtn:hover { transform: translate(-1px,-1px); box-shadow: 5px 6px 0 #D6D2C7; }
-  #startBtn:focus-visible { outline: 3px dashed #2B2B2B; outline-offset: 4px; }
-  #start small { color: #8A867D; }
+  .startBtn:hover { transform: translate(-1px,-1px); box-shadow: 5px 6px 0 #D6D2C7; }
+  .startBtn:focus-visible { outline: 3px dashed #2B2B2B; outline-offset: 4px; }
+  .startBtn small { display: block; font-size: 0.75rem; font-weight: normal; color: #55524B; margin-top: 4px; }
+  #start small.hinweis { color: #8A867D; }
 
-  /* ===== Eltern-Knopf: Ton an/aus ===== */
-  #soundBtn {
-    position: fixed; top: 12px; right: 12px; z-index: 9;
+  /* ===== Eltern-Knöpfe: Ton an/aus, Menü ===== */
+  #soundBtn, #menuBtn {
+    position: fixed; top: 12px; z-index: 9;
     width: 46px; height: 46px; font-size: 1.3rem;
     background: #FCFBF7; border: 3px solid #2B2B2B; border-radius: 50%;
     box-shadow: 3px 3px 0 #D6D2C7; cursor: pointer; display: none;
+  }
+  #soundBtn { right: 12px; }
+  #menuBtn { left: 12px; }
+
+  /* =====================================================================
+     Spielmodus "E-Mail schreiben" – lose an DIN 5008 angelehnt (Anrede,
+     eingerückte Absätze, Aufzählungen), aber ohne die genauen Rand-/
+     Zeilenmaße der Norm, da hier Bilder statt Text stehen.
+     ---------------------------------------------------------------------
+     Anders als beim Frei-Modus schweben hier keine Bilder frei im Fenster,
+     sondern jedes neue Bild wird als <span class="emailIcon"> in die
+     AKTUELLE ZEILE eingehängt und BLEIBT stehen (siehe appendEmailIcon()
+     im Script). #emailBody ist KEINE einzelne flex-wrap-Reihe mehr, sondern
+     ein senkrecht gestapelter Container (flex-direction: column) aus
+     mehreren Zeilen-Elementen:
+       .emailPara      – ein eingerückter Absatz (neu bei Enter-Taste)
+       .emailListItem  – ein Aufzählungspunkt mit vorangestelltem "•"
+                          (neu bei "-"-Taste)
+     Innerhalb einer Zeile reihen sich die Bilder wie gewohnt per
+     flex-wrap nebeneinander auf. Jede neue Zeile kommt an den Anschluss/
+     ans Ende von #emailBody. */
+  #emailView {
+    position: fixed; inset: 0; z-index: 1;
+    display: none; flex-direction: column; align-items: center;
+    padding: 70px 20px 96px;
+  }
+  #emailCard {
+    width: min(900px, 92vw); flex: 1; max-height: 100%;
+    background: #FFFFFF; border: 3.5px solid #2B2B2B; border-radius: 18px;
+    box-shadow: 6px 7px 0 #D6D2C7; padding: 20px 24px;
+    display: flex; flex-direction: column; gap: 14px;
+    overflow-y: auto; position: relative;
+  }
+  .emailField {
+    display: flex; align-items: baseline; gap: 8px; flex: none;
+    color: #8A867D; font-size: 1rem; border-bottom: 2px dashed #E4E1D8; padding-bottom: 8px;
+  }
+  .emailField b { color: #2B2B2B; }
+  /* Anrede: feste, nicht löschbare Begrüßungszeile zwischen Briefkopf (An/Betreff) und
+     Fließtext-Bereich – wie bei einem echten Brief steht sie außerhalb des eigentlichen
+     "Text"-Bereichs und bleibt auch bei "Neue Nachricht" unverändert stehen. */
+  #emailAnrede {
+    flex: none; font-size: 1.1rem; color: #2B2B2B; padding-top: 2px;
+  }
+  #emailBody {
+    flex: 1; display: flex; flex-direction: column;
+    gap: 6px; padding-top: 4px; min-height: 140px;
+  }
+  /* Absatz: eingerückt (margin-left), wie der klassische "Einzug" am Absatzanfang in
+     älteren deutschen Briefkonventionen (DIN 5008 selbst nutzt heute eher Leerzeilen
+     ohne Einzug – hier bewusst mit Einrückung, wie gewünscht). */
+  .emailPara {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 8px 10px; margin-left: 2.6em;
+  }
+  /* Aufzählungspunkt: hängender Einzug (kleiner als der Absatz-Einzug) mit
+     vorangestelltem Aufzählungszeichen – die Bilder folgen dem "•" wie Listenpunkte. */
+  .emailListItem {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 8px 10px; margin-left: 1.2em;
+  }
+  .emailBullet {
+    font-size: 1.5rem; line-height: 1; color: #2B2B2B; flex: none;
+  }
+  .emailIcon {
+    width: 60px; height: 60px; flex: none;
+    filter: drop-shadow(2px 3px 0 #D6D2C7);
+    animation: popIn 0.35s ease-out;
+  }
+  .emailIcon svg, .emailIcon img { width: 100%; height: 100%; object-fit: contain; }
+  @keyframes popIn {
+    0% { transform: scale(0.3); opacity: 0; }
+    70% { transform: scale(1.08); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  #sentBadge {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; color: #2B2B2B; background: rgba(255, 212, 59, 0.92);
+    border-radius: 14px; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+  }
+  #sentBadge.show { opacity: 1; }
+  #emailToolbar {
+    position: fixed; bottom: 16px; left: 0; right: 0; z-index: 2;
+    display: none; justify-content: center; gap: 14px;
+  }
+  #emailToolbar button {
+    font-family: inherit; font-size: 1.05rem; padding: 12px 22px;
+    background: #FCFBF7; color: #2B2B2B; border: 3px solid #2B2B2B;
+    border-radius: 12px; cursor: pointer; box-shadow: 3px 4px 0 #D6D2C7;
+  }
+  #sendBtn { background: #FFD43B; }
+
+  /* =====================================================================
+     Sende-Animation: Brief faltet sich zum Papierflieger und fliegt weg.
+     ---------------------------------------------------------------------
+     Kein echtes Form-Morphing (ein Rechteck lässt sich mit CSS nicht sauber
+     in eine Papierflieger-Silhouette verformen) – stattdessen ein Trick mit
+     ZWEI übereinanderliegenden Icons plus EINEM gemeinsamen Bewegungs-Layer:
+       #sendAnim         – der äußere Container. Fliegt/dreht/verblasst als
+                            Ganzes über die Animation "sendFly" (siehe unten).
+                            Alles, was innen drin ist, macht diese Bewegung
+                            automatisch mit (CSS-Transforms vererben sich).
+       .letterIcon        – zeigt das Brief-SVG. Staucht sich per "sendFold"
+                            schnell zusammen und verblasst (wirkt wie Falten).
+       .planeIcon          – zeigt das Papierflieger-SVG, startet unsichtbar
+                            und blendet sich per "sendUnfold" zeitversetzt
+                            genau dann ein, wenn der Brief fast verschwunden
+                            ist (ca. 30–40% der Laufzeit) – der Überblend-
+                            Moment verkauft die Illusion des "Faltens".
+     Alle drei Animationen laufen GLEICHZEITIG über dieselbe Dauer (3s), nur
+     mit unterschiedlichen Prozent-Marken in ihren eigenen @keyframes – so
+     bleiben sie synchron, ohne dass JS die Zeitpunkte koordinieren muss.
+     JS-Seite (siehe sendBtn-Click-Handler weiter unten): fügt nur die Klasse
+     ".fly" hinzu, die alle drei @keyframes gleichzeitig auslöst.
+     ===================================================================== */
+  #sendAnim {
+    position: fixed; left: 50%; top: 50%; width: 66vmin; height: 66vmin;
+    margin: -33vmin 0 0 -33vmin; /* zentriert das Element exakt auf dem Bildschirmmittelpunkt (halbe Breite/Höhe nach oben/links versetzt) */
+    z-index: 15; opacity: 0; pointer-events: none; /* unsichtbar & nicht klickbar, bis .fly aktiv ist */
+  }
+  #sendAnim .letterIcon, #sendAnim .planeIcon {
+    position: absolute; inset: 0; opacity: 0; /* beide Icons liegen exakt übereinander, siehe Kommentar oben */
+  }
+  #sendAnim .letterIcon svg, #sendAnim .planeIcon svg {
+    width: 100%; height: 100%; filter: drop-shadow(3px 4px 0 #D6D2C7);
+  }
+  #sendAnim.fly { animation: sendFly 3s ease-in forwards; }
+  #sendAnim.fly .letterIcon { animation: sendFold 3s ease-in forwards; }
+  #sendAnim.fly .planeIcon { animation: sendUnfold 3s ease-in forwards; }
+  /* Bewegt den GESAMTEN Container: kurzes Zögern (0–30%), dann diagonal aus dem
+     Bildschirm heraus Richtung oben rechts (vw/vh = relativ zur Fenstergröße, damit
+     der Flieger auf jedem Bildschirm wirklich den sichtbaren Bereich verlässt). */
+  @keyframes sendFly {
+    0%   { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(1); }
+    30%  { opacity: 1; transform: translate(0, 0) rotate(-4deg) scale(0.9); }
+    100% { opacity: 0; transform: translate(70vw, -65vh) rotate(20deg) scale(0.5); }
+  }
+  /* Der Brief: staucht sich in der Vertikalen zusammen (scaleY sinkt Richtung 0)
+     und verblasst kurz darauf – simuliert "falten" ohne echte Formänderung. */
+  @keyframes sendFold {
+    0%   { opacity: 1; transform: scaleY(1) rotate(0deg); }
+    28%  { opacity: 1; transform: scaleY(0.35) rotate(-8deg); }
+    38%  { opacity: 0; transform: scaleY(0.1) rotate(-14deg); }
+    100% { opacity: 0; }
+  }
+  /* Der Papierflieger: bleibt bis ca. 30% unsichtbar (während der Brief noch zu sehen
+     ist), blendet dann ein ("entsteht" aus der Faltung) und bleibt sichtbar, bis ihn
+     die #sendAnim.fly-Animation (opacity, s.o.) am Ende gemeinsam ausblendet. */
+  @keyframes sendUnfold {
+    0%   { opacity: 0; transform: scale(0.6) rotate(-12deg); }
+    30%  { opacity: 0; transform: scale(0.75) rotate(-8deg); }
+    40%  { opacity: 1; transform: scale(1) rotate(-4deg); }
+    100% { opacity: 1; transform: scale(1) rotate(-4deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .emailIcon { animation: none; }
+    #sendAnim.fly, #sendAnim.fly .letterIcon, #sendAnim.fly .planeIcon { animation: none; }
+  }
+
+  /* =====================================================================
+     Spielmodus "Abenteuer": Dschungelkulisse zieht langsam vorbei.
+     ---------------------------------------------------------------------
+     STAPEL-REIHENFOLGE (per z-index, wichtig fürs "Versteckt hinter dem
+     Baum"-Gefühl):
+       1 #advBack           kleine, gedämpfte Bäume/Büsche – ganz hinten
+       2 #advSpriteLayer    hier landen die Tippbilder-Symbole (spawnAdventureSprite)
+       3 #advFront          große Bäume/Büsche – DAVOR, verdeckt also Symbole
+       4 #advVignette       zwei große Blätter an den oberen Ecken, ganz vorne
+     Weil #advFront einen höheren z-index als #advSpriteLayer hat, malt der
+     Browser die vorderen Bäume ÜBER die Symbole – genau dort, wo sich ihre
+     Formen überschneiden, "verschwindet" ein Symbol optisch dahinter.
+
+     ENDLOS-SCROLL-TRICK (für #advBack und #advFront identisch, per .advTrack):
+     Ein .advTrack ist 200% breit (also zwei Bildschirmbreiten) und enthält
+     ZWEI IDENTISCHE .advTile-Kacheln nebeneinander (je 50% = eine volle
+     Bildschirmbreite, erzeugt in buildAdventureScene() im Script). Die
+     @keyframes advScroll verschieben den Track linear von 0 bis -50% seiner
+     eigenen Breite – das ist exakt eine Kachelbreite. Sobald die Animation
+     bei -50% wieder von vorne beginnt (CSS-Animationen springen bei "infinite"
+     nahtlos zurück auf 0%), steht durch die Kachel-Wiederholung optisch exakt
+     dasselbe Bild wie am Anfang da: kein sichtbarer Sprung, endloser Loop.
+     #advBack und #advFront haben eigene, unterschiedlich lange Laufzeiten
+     (85s / 42s) – die vordere, größere Ebene bewegt sich schneller als die
+     hintere, das erzeugt den Tiefen-/Parallaxe-Eindruck ("näher = schneller").
+
+     GRÖSSEN IN vh STATT px: buildAdvTile() im Script setzt Baum-Höhen in
+     vh (Prozent der Fensterhöhe), nicht in Pixeln. So bleibt die Kulisse auf
+     jedem Bildschirm gleich dicht/hoch, statt auf kleinen Fenstern zu
+     verkümmern oder auf großen zu wenig auszufüllen. */
+  #adventureView {
+    position: fixed; inset: 0; z-index: 1; display: none; overflow: hidden;
+    background: linear-gradient(#DCEEDD 0%, #BFE0B8 22%, #8FCB86 55%, #6FAE66 100%);
+  }
+  .advLayer { position: absolute; inset: 0; overflow: hidden; }
+  .advTrack { position: absolute; top: 0; left: 0; width: 200%; height: 100%; }
+  .advTrack .advTile { position: absolute; top: 0; left: 0; width: 50%; height: 100%; }
+  .advTreeItem { position: absolute; bottom: 0; } /* jede Pflanze steht auf dem "Boden" (unterer Rand ihrer Ebene) */
+  .advTreeItem svg { display: block; width: 100%; height: 100%; }
+  #advBack { z-index: 1; opacity: 0.65; } /* gedämpfte Deckkraft = wirkt weiter weg/verschwommener */
+  #advBack .advTrack { animation: advScroll 85s linear infinite; } /* langsam = "weiter hinten" */
+  #advSpriteLayer { z-index: 2; }
+  #advFront { z-index: 3; } /* über den Symbolen -> verdeckt sie teilweise, siehe Erklärung oben */
+  #advFront .advTrack { animation: advScroll 42s linear infinite; } /* schneller = "näher dran" (Parallaxe) */
+  @keyframes advScroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); } /* exakt eine Kachelbreite, siehe Erklärung oben */
+  }
+  /* Laub-Umrandung oben: verstärkt den "mitten im Unterholz"-Eindruck, unabhängig
+     vom Scrollen der Baumreihen – bleibt an den Bildschirmecken, wiegt sich sanft.
+     Ganz vorne (z-index 4, höchster Wert in dieser Kulisse), rein dekorativ. */
+  #advVignette { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
+  .advLeaf {
+    position: absolute; top: -6%; width: 40vw; height: 40vh; max-width: 360px; max-height: 360px;
+    filter: drop-shadow(3px 4px 0 rgba(0,0,0,0.12));
+  }
+  .advLeaf svg { display: block; width: 100%; height: 100%; }
+  .advLeaf.tl { left: -6%; animation: advSwayL 7s ease-in-out infinite; }
+  /* .tr nutzt dasselbe SVG wie .tl, gespiegelt per scaleX(-1) (statt ein zweites,
+     seitenverkehrtes Blatt zu zeichnen). Die Spiegelung muss deshalb auch in den
+     @keyframes von advSwayR mit auftauchen (siehe unten) – sonst würde die Sway-
+     Animation die feste transform:scaleX(-1)-Regel hier bei jedem Frame überschreiben
+     und das Blatt kurz "umklappen". animation-delay: -3.5s (halbe Zyklusdauer, negativ)
+     startet die rechte Animation bereits mittendrin, damit beide Blätter nicht synchron,
+     sondern gegenläufig wiegen – wirkt organischer als im Gleichtakt. */
+  .advLeaf.tr { right: -6%; transform: scaleX(-1); animation: advSwayR 7s ease-in-out infinite; animation-delay: -3.5s; }
+  @keyframes advSwayL {
+    0%, 100% { transform: rotate(-2deg); }
+    50%      { transform: rotate(2deg); }
+  }
+  @keyframes advSwayR {
+    0%, 100% { transform: scaleX(-1) rotate(-2deg); }
+    50%      { transform: scaleX(-1) rotate(2deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .advTrack { animation: none !important; }
+    .advLeaf.tl, .advLeaf.tr { animation: none !important; }
   }
 </style>
 </head>
@@ -126,11 +397,61 @@
   <p>Jede Taste lässt ein kleines Bild aufblühen – manche verwandeln sich in ein anderes.<br>
      Für Eltern: <strong>Esc</strong> beendet den Vollbildmodus jederzeit.
      Windows-Taste und Strg&nbsp;+&nbsp;W kann eine Webseite nicht abfangen.</p>
-  <button id="startBtn">Los geht's – Vollbild starten</button>
-  <small>Funktioniert komplett offline. Einfach Datei öffnen.</small>
+  <div class="modes">
+    <button class="startBtn" data-mode="frei">🎈 Frei spielen<small>Bilder blühen auf und schweben weg</small></button>
+    <button class="startBtn" data-mode="email">✉️ E-Mail schreiben<small>Bilder bleiben nebeneinander stehen</small></button>
+    <button class="startBtn" data-mode="abenteuer">🌴 Abenteuer<small>Bilder verstecken sich im Dschungel</small></button>
+  </div>
+  <small class="hinweis">Funktioniert komplett offline. Einfach Datei öffnen.</small>
 </div>
 
 <button id="soundBtn" title="Ton an/aus">🔊</button>
+<button id="menuBtn" title="Zurück zum Menü">🏠</button>
+
+<div id="emailView">
+  <div id="emailCard">
+    <div class="emailField">An: <b>Oma &amp; Opa</b></div>
+    <div class="emailField">Betreff: <b>Meine Bilder</b></div>
+    <div id="emailAnrede">Liebe Oma, lieber Opa,</div>
+    <div id="emailBody"></div>
+    <div id="sentBadge">✔ Gesendet!</div>
+  </div>
+</div>
+
+<div id="adventureView">
+  <div id="advBack" class="advLayer"><div id="advBackTrack" class="advTrack"></div></div>
+  <div id="advSpriteLayer" class="advLayer"></div>
+  <div id="advFront" class="advLayer"><div id="advFrontTrack" class="advTrack"></div></div>
+  <div id="advVignette" aria-hidden="true">
+    <div class="advLeaf tl"><svg viewBox="0 0 100 100"><g fill="none" stroke="#2B2B2B" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 2 Q70 2 82 46 Q90 78 50 88 Q14 94 4 66 Q-2 34 2 2 Z" fill="#5FAE55"/>
+      <path d="M4 6 Q46 16 64 52" stroke-width="3"/>
+      <path d="M14 10 Q40 24 52 50" stroke-width="2.5"/>
+    </g></svg></div>
+    <div class="advLeaf tr"><svg viewBox="0 0 100 100"><g fill="none" stroke="#2B2B2B" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 2 Q70 2 82 46 Q90 78 50 88 Q14 94 4 66 Q-2 34 2 2 Z" fill="#5FAE55"/>
+      <path d="M4 6 Q46 16 64 52" stroke-width="3"/>
+      <path d="M14 10 Q40 24 52 50" stroke-width="2.5"/>
+    </g></svg></div>
+  </div>
+</div>
+
+<div id="sendAnim" aria-hidden="true">
+  <div class="letterIcon"><svg viewBox="0 0 100 100"><g fill="none" stroke="#2B2B2B" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="14" y="14" width="72" height="72" rx="4" fill="#FFFFFF"/>
+    <path d="M24 34 L76 34 M24 50 L76 50 M24 66 L60 66" stroke-width="3"/>
+  </g></svg></div>
+  <div class="planeIcon"><svg viewBox="0 0 100 100"><g fill="none" stroke="#2B2B2B" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 60 L92 20 L60 88 L50 58 Z" fill="#FFFFFF"/>
+    <path d="M50 58 L92 20"/>
+    <path d="M8 60 L50 58 L38 78 Z" fill="#FFD43B"/>
+  </g></svg></div>
+</div>
+
+<div id="emailToolbar">
+  <button id="newMailBtn">🗑️ Neue Nachricht</button>
+  <button id="sendBtn">📤 Absenden</button>
+</div>
 
 <script>
 /* =====================================================================
@@ -150,22 +471,29 @@ const NUR_EIGENE = false;
 /* Anteil der Bilder, die sich nach kurzer Zeit in ein anderes verwandeln (0 bis 1) */
 const MORPH_ANTEIL = 0.65;
 
-/* ===== Eingebaute Piktogramme (SVG, Marker-Stil) ===== */
+/* Wahrscheinlichkeit, dass eine Buchstabentaste ihr passendes Motiv zeigt (0 bis 1).
+   Der Rest der Zeit erscheint ein zufälliges Motiv aus dem gesamten Pool, damit beim
+   wiederholten Drücken derselben Taste trotzdem alle Bilder mal auftauchen.
+   Niedrig halten: inzwischen sind 23 von 26 Buchstaben zugeordnet (siehe LETTER_MAP),
+   ein hoher Wert würde also fast jede Taste bremsen und den Pool insgesamt eintönig
+   wirken lassen, statt nur vereinzelte Tasten thematisch zu färben. */
+const BUCHSTABEN_TREFFERQUOTE = 0.3;
+
+/* ===== Eingebaute Piktogramme (SVG, Marker-Stil) =====
+   Jedes Piktogramm hat einen Namen; daraus wird pro Buchstabentaste
+   eine Gruppe passender Anfangsbuchstaben-Motive gebildet (siehe LETTER_MAP unten). */
 const S = 'fill="none" stroke="#2B2B2B" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"';
 const PIKTOS = [
-  // Sonne
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  { name: 'Sonne', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <circle cx="50" cy="50" r="19" fill="#FFD43B"/>
     <path d="M50 22 L50 12 M70 30 L77 23 M78 50 L88 50 M70 70 L77 77 M50 78 L50 88 M30 70 L23 77 M22 50 L12 50 M30 30 L23 23"/>
-  </g></svg>`,
-  // Haus
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Haus', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M26 56 L26 86 L74 86 L74 56" fill="#FFFFFF"/>
     <path d="M18 58 L50 27 L82 58"/>
     <rect x="44" y="65" width="13" height="21" fill="#FFD43B"/>
-  </g></svg>`,
-  // Katze
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Katze', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M34 42 L29 20 L47 33" fill="#FFFFFF"/>
     <path d="M66 42 L71 20 L53 33" fill="#FFFFFF"/>
     <circle cx="50" cy="56" r="23" fill="#FFFFFF"/>
@@ -173,98 +501,83 @@ const PIKTOS = [
     <circle cx="58" cy="52" r="2.2" fill="#2B2B2B"/>
     <path d="M47 62 Q50 65 53 62"/>
     <path d="M28 58 L15 55 M28 64 L16 66 M72 58 L85 55 M72 64 L84 66" stroke-width="3"/>
-  </g></svg>`,
-  // Blume
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Blume', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M50 60 C47 74 52 84 50 93"/>
     <path d="M50 78 Q36 76 32 66 Q46 66 50 78 Z" fill="#B2D98C"/>
     <circle cx="50" cy="24" r="10" fill="#FFFFFF"/><circle cx="66" cy="34" r="10" fill="#FFFFFF"/>
     <circle cx="66" cy="52" r="10" fill="#FFFFFF"/><circle cx="50" cy="60" r="10" fill="#FFFFFF"/>
     <circle cx="34" cy="52" r="10" fill="#FFFFFF"/><circle cx="34" cy="34" r="10" fill="#FFFFFF"/>
     <circle cx="50" cy="43" r="10" fill="#FFD43B"/>
-  </g></svg>`,
-  // Stern
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Stern', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M50 15 L58 40 L84 40 L63 55 L71 81 L50 66 L29 81 L37 55 L16 40 L42 40 Z" fill="#FFD43B"/>
-  </g></svg>`,
-  // Ballon
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Ballon', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <ellipse cx="50" cy="38" rx="20" ry="25" fill="#F76707"/>
     <path d="M46 65 L54 65 L50 71 Z" fill="#F76707"/>
     <path d="M50 71 Q42 80 50 87 Q58 93 52 98" stroke-width="3.5"/>
-  </g></svg>`,
-  // Auto
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Auto', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M18 66 L18 56 Q18 49 26 49 L38 49 L46 37 L64 37 Q71 37 73 45 L74 49 Q84 51 84 59 L84 66 Z" fill="#FFD43B"/>
     <circle cx="33" cy="68" r="8" fill="#FFFFFF"/>
     <circle cx="68" cy="68" r="8" fill="#FFFFFF"/>
-  </g></svg>`,
-  // Baum
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Baum', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M46 91 L46 62 M54 91 L54 64"/>
     <path d="M50 18 Q70 18 73 36 Q84 42 74 54 Q72 66 56 63 Q46 70 38 61 Q24 60 28 46 Q24 32 38 30 Q40 18 50 18 Z" fill="#B2D98C"/>
-  </g></svg>`,
-  // Fisch
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Fisch', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M24 50 Q48 27 71 50 Q48 73 24 50 Z" fill="#FFFFFF"/>
     <path d="M71 50 L88 37 L88 63 Z" fill="#FFD43B"/>
     <circle cx="36" cy="46" r="2.4" fill="#2B2B2B"/>
     <path d="M50 42 Q56 50 50 58" stroke-width="3.5"/>
-  </g></svg>`,
-  // Herz
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Herz', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M50 82 C18 58 22 30 41 30 C48 30 50 39 50 42 C50 39 52 30 59 30 C78 30 82 58 50 82 Z" fill="#F03E3E"/>
-  </g></svg>`,
-  // Wolke mit Regen
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Wolke', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M30 52 A10 10 0 0 1 32 32 A13 13 0 0 1 56 26 A11 11 0 0 1 72 37 A9 9 0 0 1 68 52 Z" fill="#FFFFFF"/>
     <path d="M36 61 L33 71 M50 63 L47 75 M64 61 L61 71" stroke="#4DABF7" stroke-width="4"/>
-  </g></svg>`,
-  // Vogel
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Vogel', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M31 54 Q31 39 46 39 Q63 39 63 54 Q63 66 46 66 Q31 66 31 54 Z" fill="#FFFFFF"/>
     <path d="M63 49 L76 53 L63 58 Z" fill="#FFD43B"/>
     <path d="M39 50 Q46 42 53 50"/>
     <circle cx="42" cy="48" r="2.2" fill="#2B2B2B"/>
     <path d="M42 66 L40 76 M50 66 L52 76" stroke-width="3.5"/>
-  </g></svg>`,
-  // Mond mit Sternen
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Mond', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M60 16 A35 35 0 1 0 60 84 A28 28 0 1 1 60 16 Z" fill="#FFD43B"/>
     <path d="M72 30 L74 36 L80 38 L74 40 L72 46 L70 40 L64 38 L70 36 Z" fill="#FFFFFF" stroke-width="3"/>
     <path d="M78 60 L79.5 64 L84 65.5 L79.5 67 L78 71 L76.5 67 L72 65.5 L76.5 64 Z" fill="#FFFFFF" stroke-width="2.5"/>
-  </g></svg>`,
-  // Boot
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Boot', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M22 58 L78 58 L68 74 L32 74 Z" fill="#F76707"/>
     <path d="M50 58 L50 22"/>
     <path d="M50 24 L72 54 L50 54 Z" fill="#FFFFFF"/>
     <path d="M16 84 Q24 78 32 84 Q40 90 48 84 Q56 78 64 84 Q72 90 80 84" stroke="#4DABF7" stroke-width="4"/>
-  </g></svg>`,
-  // Apfel
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Apfel', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M50 36 Q28 30 28 56 Q28 82 50 82 Q72 82 72 56 Q72 30 50 36 Z" fill="#F03E3E"/>
     <path d="M50 36 Q51 27 57 22"/>
     <path d="M57 26 Q70 22 70 32 Q60 36 57 26 Z" fill="#B2D98C"/>
-  </g></svg>`,
-  // Schmetterling
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Schmetterling', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M50 42 Q26 22 21 42 Q20 56 50 52 Z" fill="#FFD43B"/>
     <path d="M50 42 Q74 22 79 42 Q80 56 50 52 Z" fill="#FFD43B"/>
     <path d="M50 54 Q30 60 34 73 Q44 78 50 60 Z" fill="#F76707"/>
     <path d="M50 54 Q70 60 66 73 Q56 78 50 60 Z" fill="#F76707"/>
     <path d="M50 36 L50 68 M50 36 Q45 28 41 25 M50 36 Q55 28 59 25" stroke-width="3.5"/>
-  </g></svg>`,
-  // Schnecke
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Schnecke', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <circle cx="58" cy="52" r="18" fill="#FFD43B"/>
     <path d="M58 52 Q67 52 67 44 Q67 35 56 36 Q49 37 50 45" stroke-width="3.5"/>
     <path d="M78 70 L28 70 Q20 70 23 61 Q25 54 31 56 L31 44 M39 55 L39 45" fill="#FFFFFF"/>
     <circle cx="31" cy="42" r="2" fill="#2B2B2B"/>
     <circle cx="39" cy="43" r="2" fill="#2B2B2B"/>
-  </g></svg>`,
-  // Marienkäfer
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Marienkäfer', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <circle cx="50" cy="30" r="9" fill="#2B2B2B"/>
     <path d="M22 55 A28 28 0 0 1 78 55 Q78 76 50 76 Q22 76 22 55 Z" fill="#F03E3E"/>
     <path d="M50 34 L50 76"/>
@@ -272,44 +585,38 @@ const PIKTOS = [
     <circle cx="63" cy="50" r="4" fill="#2B2B2B" stroke="none"/>
     <circle cx="40" cy="65" r="4" fill="#2B2B2B" stroke="none"/>
     <circle cx="60" cy="65" r="4" fill="#2B2B2B" stroke="none"/>
-  </g></svg>`,
-  // Pilz
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Pilz', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M22 52 Q22 22 50 22 Q78 22 78 52 Z" fill="#F03E3E"/>
     <circle cx="38" cy="38" r="4" fill="#FFFFFF" stroke="none"/>
     <circle cx="56" cy="32" r="4.5" fill="#FFFFFF" stroke="none"/>
     <circle cx="62" cy="44" r="3.5" fill="#FFFFFF" stroke="none"/>
     <path d="M40 52 L38 78 Q50 85 62 78 L60 52" fill="#FFFFFF"/>
-  </g></svg>`,
-  // Rakete
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Rakete', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M50 10 Q66 28 62 60 L38 60 Q34 28 50 10 Z" fill="#FFFFFF"/>
     <circle cx="50" cy="36" r="7" fill="#4DABF7"/>
     <path d="M38 60 L27 74 L40 68 Z" fill="#F03E3E"/>
     <path d="M62 60 L73 74 L60 68 Z" fill="#F03E3E"/>
     <path d="M44 64 Q50 82 56 64 Z" fill="#FFD43B"/>
-  </g></svg>`,
-  // Regenschirm
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Regenschirm', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M20 52 A30 30 0 0 1 80 52 Q75 46 70 52 Q65 46 60 52 Q55 46 50 52 Q45 46 40 52 Q35 46 30 52 Q25 46 20 52 Z" fill="#F76707"/>
     <path d="M50 22 L50 14 M50 52 L50 78 Q50 87 42 86"/>
-  </g></svg>`,
-  // Ente
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Ente', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M26 60 Q26 47 41 47 Q43 35 55 35 Q67 35 67 45 Q66 51 60 53 Q74 53 74 61 Q74 73 50 73 Q26 73 26 60 Z" fill="#FFD43B"/>
     <path d="M67 42 L80 46 L67 50 Z" fill="#F76707"/>
     <circle cx="59" cy="41" r="2.2" fill="#2B2B2B"/>
     <path d="M20 82 Q28 76 36 82 Q44 88 52 82 Q60 76 68 82 Q76 88 84 82" stroke="#4DABF7" stroke-width="4"/>
-  </g></svg>`,
-  // Eis
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Eis', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <path d="M37 50 L50 90 L63 50 Z" fill="#FFD43B"/>
     <path d="M41 58 L58 54 M44 68 L56 65 M47 78 L53 76" stroke-width="3"/>
     <circle cx="50" cy="38" r="17" fill="#FFFFFF"/>
     <circle cx="50" cy="19" r="5" fill="#F03E3E"/>
-  </g></svg>`,
-  // Schneemann
-  `<svg viewBox="0 0 100 100"><g ${S}>
+  </g></svg>` },
+  { name: 'Schneemann', svg: `<svg viewBox="0 0 100 100"><g ${S}>
     <circle cx="50" cy="67" r="19" fill="#FFFFFF"/>
     <circle cx="50" cy="36" r="14" fill="#FFFFFF"/>
     <circle cx="45" cy="33" r="2" fill="#2B2B2B"/>
@@ -318,46 +625,360 @@ const PIKTOS = [
     <circle cx="50" cy="61" r="2.2" fill="#2B2B2B"/>
     <circle cx="50" cy="70" r="2.2" fill="#2B2B2B"/>
     <path d="M33 56 L20 48 M67 56 L80 48" stroke-width="3.5"/>
+  </g></svg>` },
+  // --- Weitere Tiere ---
+  { name: 'Hund', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <ellipse cx="26" cy="48" rx="10" ry="16" fill="#FFFFFF" transform="rotate(-15 26 48)"/>
+    <ellipse cx="74" cy="48" rx="10" ry="16" fill="#FFFFFF" transform="rotate(15 74 48)"/>
+    <circle cx="50" cy="56" r="24" fill="#FFFFFF"/>
+    <ellipse cx="50" cy="66" rx="12" ry="9" fill="#FFFFFF"/>
+    <circle cx="42" cy="50" r="2.4" fill="#2B2B2B"/>
+    <circle cx="58" cy="50" r="2.4" fill="#2B2B2B"/>
+    <circle cx="50" cy="62" r="3" fill="#2B2B2B" stroke="none"/>
+    <path d="M44 70 Q50 74 56 70"/>
+  </g></svg>` },
+  { name: 'Löwe', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M50 20 Q74 20 78 44 Q84 50 78 58 Q80 74 64 74 Q68 84 50 84 Q32 84 36 74 Q20 74 22 58 Q16 50 22 44 Q26 20 50 20 Z" fill="#F76707"/>
+    <circle cx="50" cy="54" r="20" fill="#FFD43B"/>
+    <circle cx="43" cy="50" r="2.2" fill="#2B2B2B"/>
+    <circle cx="57" cy="50" r="2.2" fill="#2B2B2B"/>
+    <path d="M46 60 Q50 63 54 60"/>
+    <path d="M50 57 L50 60"/>
+  </g></svg>` },
+  { name: 'Giraffe', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M40 90 L40 60 Q40 30 50 22 Q60 30 58 50 L58 90" fill="#FFFFFF"/>
+    <path d="M40 90 L40 82 M58 90 L58 82"/>
+    <circle cx="50" cy="18" r="8" fill="#FFFFFF"/>
+    <path d="M46 11 L45 5 M54 11 L55 5"/>
+    <circle cx="53" cy="16" r="1.8" fill="#2B2B2B"/>
+    <circle cx="46" cy="40" r="4" fill="#F76707" stroke="none"/>
+    <circle cx="50" cy="58" r="4" fill="#F76707" stroke="none"/>
+    <circle cx="45" cy="74" r="4" fill="#F76707" stroke="none"/>
+  </g></svg>` },
+  { name: 'Igel', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M20 66 Q18 40 50 36 Q82 40 80 66 Q80 78 50 78 Q20 78 20 66 Z" fill="#F76707"/>
+    <path d="M30 42 L24 32 M40 37 L36 26 M50 35 L50 24 M60 37 L64 26 M70 42 L76 32" stroke-width="3.5"/>
+    <path d="M20 66 Q10 62 14 56" fill="#FFFFFF"/>
+    <circle cx="16" cy="60" r="1.8" fill="#2B2B2B"/>
+    <circle cx="34" cy="80" r="3" fill="#2B2B2B" stroke="none"/>
+    <circle cx="66" cy="80" r="3" fill="#2B2B2B" stroke="none"/>
+  </g></svg>` },
+  { name: 'Elefant', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <circle cx="22" cy="46" r="14" fill="#FFFFFF"/>
+    <circle cx="78" cy="46" r="14" fill="#FFFFFF"/>
+    <circle cx="50" cy="50" r="24" fill="#FFFFFF"/>
+    <path d="M44 66 Q40 82 48 86 Q52 88 52 82" stroke-width="4"/>
+    <circle cx="42" cy="46" r="2.2" fill="#2B2B2B"/>
+    <circle cx="58" cy="46" r="2.2" fill="#2B2B2B"/>
+    <path d="M38 62 L34 68 M62 62 L66 68" stroke-width="3"/>
+  </g></svg>` },
+  { name: 'Delfin', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M18 58 Q22 30 48 26 Q70 24 82 40 Q68 42 60 34 Q64 50 46 60 Q30 68 18 58 Z" fill="#4DABF7"/>
+    <path d="M52 28 L58 14 L62 30 Z" fill="#4DABF7"/>
+    <path d="M18 58 L6 64 L14 46 Z" fill="#4DABF7"/>
+    <circle cx="70" cy="36" r="2" fill="#2B2B2B"/>
+  </g></svg>` },
+  { name: 'Zebra', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M20 70 L20 50 Q20 34 34 30 L36 18 L44 30 L60 30 Q76 30 76 46 L76 70" fill="#FFFFFF"/>
+    <path d="M20 70 L20 80 M30 70 L30 80 M66 70 L66 80 M76 70 L76 80"/>
+    <path d="M30 34 L30 46 M40 32 L40 48 M50 32 L50 50 M60 34 L60 52" stroke-width="3"/>
+    <circle cx="70" cy="38" r="2.2" fill="#2B2B2B"/>
+    <path d="M36 18 L40 24" stroke-width="3"/>
+  </g></svg>` },
+  { name: 'Frosch', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <ellipse cx="50" cy="60" rx="30" ry="20" fill="#B2D98C"/>
+    <circle cx="34" cy="38" r="10" fill="#B2D98C"/>
+    <circle cx="66" cy="38" r="10" fill="#B2D98C"/>
+    <circle cx="34" cy="36" r="3" fill="#2B2B2B" stroke="none"/>
+    <circle cx="66" cy="36" r="3" fill="#2B2B2B" stroke="none"/>
+    <path d="M38 64 Q50 70 62 64"/>
+    <path d="M22 70 Q10 74 12 84 M78 70 Q90 74 88 84" stroke-width="4"/>
+  </g></svg>` },
+  { name: 'Qualle', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M22 46 A28 28 0 0 1 78 46 Q78 54 50 54 Q22 54 22 46 Z" fill="#F76707"/>
+    <path d="M30 54 Q28 68 34 80 M42 54 Q40 70 46 84 M58 54 Q60 70 54 84 M70 54 Q72 68 66 80" stroke-width="3.5"/>
+  </g></svg>` },
+  { name: 'Nashorn', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <ellipse cx="45" cy="56" rx="28" ry="17" fill="#FFFFFF"/>
+    <path d="M70 50 Q84 48 82 60 Q80 66 70 62" fill="#FFFFFF"/>
+    <path d="M78 44 L88 36 L82 50 Z" fill="#FFFFFF"/>
+    <circle cx="80" cy="52" r="1.8" fill="#2B2B2B"/>
+    <path d="M28 70 L28 80 M40 70 L40 80 M56 70 L56 80 M68 70 L68 80"/>
+  </g></svg>` },
+  // --- Gegenstände ---
+  { name: 'Clown', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M32 30 L50 8 L68 30 Z" fill="#F03E3E"/>
+    <circle cx="50" cy="52" r="24" fill="#FFFFFF"/>
+    <circle cx="41" cy="48" r="2.4" fill="#2B2B2B"/>
+    <circle cx="59" cy="48" r="2.4" fill="#2B2B2B"/>
+    <circle cx="50" cy="58" r="6" fill="#F03E3E"/>
+    <path d="M36 64 Q50 74 64 64"/>
+  </g></svg>` },
+  { name: 'Uhr', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <circle cx="50" cy="50" r="34" fill="#FFFFFF"/>
+    <path d="M50 20 L50 26 M80 50 L74 50 M50 80 L50 74 M20 50 L26 50"/>
+    <path d="M50 50 L50 30" stroke-width="3.5"/>
+    <path d="M50 50 L66 56" stroke-width="3.5"/>
+    <circle cx="50" cy="50" r="3" fill="#2B2B2B" stroke="none"/>
+  </g></svg>` },
+  { name: 'Ball', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <circle cx="50" cy="50" r="34" fill="#FFD43B"/>
+    <path d="M50 16 Q66 34 50 50 Q34 66 50 84"/>
+    <path d="M18 42 Q40 50 18 58 M82 42 Q60 50 82 58" stroke-width="3.5"/>
+  </g></svg>` },
+  { name: 'Buch', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M50 26 Q30 16 16 22 L16 74 Q30 68 50 78 Q70 68 84 74 L84 22 Q70 16 50 26 Z" fill="#FFFFFF"/>
+    <path d="M50 26 L50 78" stroke-width="3"/>
+    <path d="M24 34 L42 30 M24 44 L42 40 M58 30 L76 34 M58 40 L76 44" stroke-width="2.5"/>
+  </g></svg>` },
+  // --- Obst und Gemüse ---
+  { name: 'Orange', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <circle cx="50" cy="58" r="30" fill="#F76707"/>
+    <path d="M50 28 Q51 20 57 16"/>
+    <path d="M57 19 Q68 16 68 25 Q59 28 57 19 Z" fill="#B2D98C"/>
+  </g></svg>` },
+  { name: 'Banane', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M24 30 Q20 55 34 68 Q52 84 76 74 Q80 72 78 66 Q60 76 42 62 Q30 52 32 32 Z" fill="#FFD43B"/>
+    <path d="M74 70 Q80 68 82 62" stroke-width="3.5"/>
+  </g></svg>` },
+  { name: 'Traube', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M50 18 L50 28" stroke-width="3.5"/>
+    <path d="M50 20 Q60 14 62 22 Q54 26 50 20 Z" fill="#B2D98C"/>
+    <circle cx="42" cy="38" r="9" fill="#4DABF7"/>
+    <circle cx="58" cy="38" r="9" fill="#4DABF7"/>
+    <circle cx="34" cy="54" r="9" fill="#4DABF7"/>
+    <circle cx="50" cy="54" r="9" fill="#4DABF7"/>
+    <circle cx="66" cy="54" r="9" fill="#4DABF7"/>
+    <circle cx="42" cy="70" r="9" fill="#4DABF7"/>
+    <circle cx="58" cy="70" r="9" fill="#4DABF7"/>
+  </g></svg>` },
+  { name: 'Erdbeere', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M50 30 Q26 34 24 56 Q24 82 50 88 Q76 82 76 56 Q74 34 50 30 Z" fill="#F03E3E"/>
+    <path d="M50 30 L40 18 L50 24 L60 18 Z" fill="#B2D98C"/>
+    <circle cx="40" cy="50" r="1.6" fill="#FFD43B" stroke="none"/>
+    <circle cx="58" cy="52" r="1.6" fill="#FFD43B" stroke="none"/>
+    <circle cx="46" cy="66" r="1.6" fill="#FFD43B" stroke="none"/>
+    <circle cx="62" cy="68" r="1.6" fill="#FFD43B" stroke="none"/>
+    <circle cx="38" cy="72" r="1.6" fill="#FFD43B" stroke="none"/>
+  </g></svg>` },
+  { name: 'Karotte', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M40 40 L60 40 L52 86 Q50 90 48 86 Z" fill="#F76707"/>
+    <path d="M42 40 L38 26 M50 40 L50 20 M58 40 L62 26" stroke="#B2D98C" stroke-width="4.5"/>
+    <path d="M44 52 L56 52 M43 64 L57 64 M45 74 L55 74" stroke-width="2.5"/>
+  </g></svg>` },
+  { name: 'Gurke', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M18 56 Q18 38 36 36 Q60 32 82 44 Q90 48 88 56 Q86 64 70 66 Q44 70 24 64 Q16 62 18 56 Z" fill="#B2D98C"/>
+    <path d="M30 44 L34 54 M44 41 L46 52 M58 40 L58 52 M72 44 L70 54" stroke-width="2.5"/>
+  </g></svg>` },
+  { name: 'Zitrone', svg: `<svg viewBox="0 0 100 100"><g ${S}>
+    <path d="M50 22 Q78 26 78 50 Q78 74 50 78 Q22 74 22 50 Q22 26 50 22 Z" fill="#FFD43B"/>
+    <path d="M48 22 Q50 16 56 18 Q54 22 48 22 Z" fill="#FFFFFF"/>
+    <path d="M50 78 Q52 84 58 82" stroke-width="3"/>
+  </g></svg>` }
+];
+
+/* ===== Dschungel-Kulisse (Modus "Abenteuer"): rein dekorative Bäume/Büsche,
+   nicht Teil von PIKTOS/POOL – gleicher viewBox 0 0 60 100, damit sie sich
+   ohne Verzerrung in beliebiger Größe an den unteren Bildrand setzen lassen. */
+const ADV_BAEUME = [
+  `<svg viewBox="0 0 60 100"><g ${S}>
+    <path d="M30 98 L30 58"/>
+    <path d="M30 22 Q48 22 50 40 Q58 44 50 54 Q48 64 34 62 Q26 68 16 60 Q6 60 10 46 Q4 34 16 32 Q18 22 30 22 Z" fill="#B2D98C"/>
+  </g></svg>`,
+  `<svg viewBox="0 0 60 100"><g ${S}>
+    <path d="M8 96 Q2 74 20 70 Q22 56 38 58 Q54 52 58 70 Q64 78 54 86 Q56 96 40 94 Q28 100 14 94 Q4 98 8 96 Z" fill="#B2D98C"/>
+  </g></svg>`,
+  `<svg viewBox="0 0 60 100"><g ${S}>
+    <path d="M30 98 L33 48 Q30 42 25 38"/>
+    <path d="M31 48 Q10 40 5 22 Q24 27 31 48 Z" fill="#B2D98C"/>
+    <path d="M31 48 Q52 36 58 16 Q38 25 31 48 Z" fill="#B2D98C"/>
+    <path d="M31 48 Q13 54 6 45 Q21 42 31 48 Z" fill="#B2D98C"/>
+    <path d="M31 48 Q49 56 56 47 Q40 42 31 48 Z" fill="#B2D98C"/>
+    <path d="M31 48 Q34 30 46 22 Q42 34 31 48 Z" fill="#B2D98C"/>
   </g></svg>`
 ];
 
-/* ===== Grundgerüst ===== */
-const startOverlay = document.getElementById('start');
-const startBtn = document.getElementById('startBtn');
-const soundBtn = document.getElementById('soundBtn');
+/* ===== Grundgerüst =====
+   DOM-Referenzen, einmal beim Laden geholt (nicht bei jedem Tastendruck neu
+   suchen – schneller und die Namen dienen unten als Dokumentation). */
+const startOverlay = document.getElementById('start');           // Start-Overlay mit Moduswahl
+const startBtns = document.querySelectorAll('.startBtn');        // die 3 Moduswahl-Buttons (Frei/E-Mail/Abenteuer)
+const soundBtn = document.getElementById('soundBtn');            // Ton an/aus, oben rechts
+const menuBtn = document.getElementById('menuBtn');              // zurück zur Moduswahl, oben links
 
-let audioCtx = null;
+// Modus "E-Mail schreiben"
+const emailView = document.getElementById('emailView');          // ganze Ansicht (Briefkarte)
+const emailCard = document.getElementById('emailCard');          // die Karte selbst (wird gescrollt, siehe appendEmailIcon)
+const emailBody = document.getElementById('emailBody');          // Container, in den appendEmailIcon() die Bilder hängt
+const emailToolbar = document.getElementById('emailToolbar');    // "Neue Nachricht" / "Absenden"-Leiste
+const sentBadge = document.getElementById('sentBadge');          // "Gesendet!"-Einblendung
+const newMailBtn = document.getElementById('newMailBtn');
+const sendBtn = document.getElementById('sendBtn');
+const sendAnim = document.getElementById('sendAnim');            // Brief-faltet-sich-zum-Flieger-Animation (siehe CSS)
+
+// Modus "Abenteuer"
+const adventureView = document.getElementById('adventureView');       // ganze Dschungel-Ansicht
+const advSpriteLayer = document.getElementById('advSpriteLayer');     // Ziel-Container für spawnAdventureSprite()
+const advBackTrack = document.getElementById('advBackTrack');         // hintere Baumreihe (wird von buildAdventureScene() gefüllt)
+const advFrontTrack = document.getElementById('advFrontTrack');       // vordere Baumreihe (liegt über den Sprites, siehe CSS)
+
+let audioCtx = null;   // wird erst beim ersten Klick auf einen Start-Button erzeugt (Browser verlangen eine Nutzer-Geste dafür)
 let soundOn = true;
-let running = false;
-let lastSpawn = 0;
-const MAX_SPRITES = 45;
-const MIN_INTERVAL_MS = 80;
-const PENTATONIC = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33];
-const VARIANTEN = ['v1', 'v2', 'v3', 'v4'];
+let running = false;   // true = ein Modus läuft gerade (steuert, ob Tastatur/Klicks überhaupt etwas auslösen)
+let mode = 'frei'; // 'frei' = frei schwebende Bilder, 'email' = Bilder nebeneinander in Briefvorlage, 'abenteuer' = Dschungelkulisse
 
+// lastSpawn/MIN_INTERVAL_MS werden von ALLEN drei Modi gemeinsam genutzt (spawnPikto()
+// und appendEmailIcon() lesen/schreiben dieselbe Variable) – das reicht, weil immer nur
+// ein Modus gleichzeitig aktiv ist. Verhindert, dass eine gehaltene Taste (Auto-Repeat
+// der Tastatur) Dutzende Bilder pro Sekunde erzeugt.
+let lastSpawn = 0;
+const MAX_SPRITES = 45;      // Obergrenze gleichzeitiger Sprites JE Container (document.body bzw. #advSpriteLayer) – ältestes wird entfernt
+const MIN_INTERVAL_MS = 80;  // Mindestabstand zwischen zwei Bildern in Millisekunden
+/* Tonvorrat für playTone(): drei Oktaven derselben C-Dur-Pentatonik (C D E G A) statt nur
+   einer – klingt dadurch deutlich abwechslungsreicher, bleibt aber garantiert konsonant,
+   weil innerhalb einer Pentatonik jede Ton-Kombination gut zusammenpasst (kein Halbton-
+   Intervall enthalten, das dissonant klingen könnte). */
+const PENTATONIC = [
+  130.81, 146.83, 164.81, 196.00, 220.00,   // tiefe Oktave (C3 D3 E3 G3 A3)
+  261.63, 293.66, 329.63, 392.00, 440.00,   // mittlere Oktave (C4 D4 E4 G4 A4)
+  523.25, 587.33, 659.25, 783.99, 880.00    // hohe Oktave (C5 D5 E5 G5 A5)
+];
+const WELLENFORMEN = ['sine', 'triangle']; // zwei weiche, kindgerechte Klangfarben (keine harten square/sawtooth-Wellen)
+const VARIANTEN = ['v1', 'v2', 'v3', 'v4']; // Namen der vier CSS-Bewegungsklassen (siehe .v1–.v4 im <style>)
+
+/* POOL ist ein flaches Array aus reinen HTML-Strings (SVG-Markup oder <img>-Tags) –
+   ohne Namen, ohne Struktur. Wird direkt per innerHTML in ein .layer-Element geschrieben
+   (siehe spawnPikto()). Für die namensbasierte Buchstaben-Zuordnung wird stattdessen
+   PIKTOS (mit .name) durchsucht, siehe buildLetterMap() unten. */
 function buildPool() {
   const own = EIGENE_BILDER.map(f => `<img src="${f}" alt="">`);
   if (NUR_EIGENE && own.length) return own;
-  return own.concat(PIKTOS);
+  return own.concat(PIKTOS.map(p => p.svg));
 }
 const POOL = buildPool();
-const pick = () => POOL[Math.floor(Math.random() * POOL.length)];
+const pick = () => POOL[Math.floor(Math.random() * POOL.length)]; // ein komplett zufälliges Bild aus dem gesamten Pool
 
-function playTone() {
-  if (!soundOn || !audioCtx) return;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = 'sine';
-  osc.frequency.value = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)];
-  const t = audioCtx.currentTime;
-  gain.gain.setValueAtTime(0.22, t);
-  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
-  osc.connect(gain).connect(audioCtx.destination);
-  osc.start(t);
-  osc.stop(t + 0.5);
+/* Buchstabe -> Liste passender Piktogramme (Anfangsbuchstabe des Namens) */
+function buildLetterMap() {
+  const map = {};
+  for (const p of PIKTOS) {
+    const letter = p.name.charAt(0).toUpperCase();
+    (map[letter] ||= []).push(p.svg);
+  }
+  return map;
+}
+const LETTER_MAP = buildLetterMap();
+
+/* Bei Buchstabentaste: meistens passendes Motiv, sonst (und bei Zahl/Leertaste/Klick)
+   zufällig aus dem gesamten Pool – so tauchen bei gleicher Taste trotzdem alle Bilder mal auf */
+function pickForKey(key) {
+  if (key && key.length === 1) {
+    const group = LETTER_MAP[key.toUpperCase()];
+    if (group && group.length && Math.random() < BUCHSTABEN_TREFFERQUOTE) {
+      return group[Math.floor(Math.random() * group.length)];
+    }
+  }
+  return pick();
 }
 
-function spawnSprite() {
+/* Baut je eine Baum-/Busch-Reihe für die hintere und vordere Dschungel-Ebene. Jede Ebene
+   besteht aus zwei identischen Kacheln nebeneinander (siehe #advBack/#advFront .advTrack),
+   die per CSS endlos nach links wandern – daher wird der Inhalt einmal zufällig erzeugt
+   und zweimal identisch eingesetzt, statt bei jeder Kachel neu zu würfeln. */
+/* Höhen in vh (Prozent der Fensterhöhe), damit die Kulisse bei jeder Fenstergröße
+   gleich dicht/hoch wirkt statt bei kleinen Fenstern winzig auszusehen. */
+function buildAdvTile(count, minVh, maxVh) {
+  let html = '';
+  for (let i = 0; i < count; i++) {
+    const svg = ADV_BAEUME[Math.floor(Math.random() * ADV_BAEUME.length)];
+    const h = minVh + Math.random() * (maxVh - minVh);
+    const left = Math.random() * 96;
+    html += `<div class="advTreeItem" style="left:${left}%; height:${h}vh; width:calc(${h}vh * 0.6);">${svg}</div>`;
+  }
+  return html;
+}
+
+function buildAdventureScene() {
+  const backTile = buildAdvTile(11, 34, 62);
+  const frontTile = buildAdvTile(9, 60, 100);
+  advBackTrack.innerHTML = `<div class="advTile">${backTile}</div><div class="advTile" style="left:50%">${backTile}</div>`;
+  advFrontTrack.innerHTML = `<div class="advTile">${frontTile}</div><div class="advTile" style="left:50%">${frontTile}</div>`;
+}
+buildAdventureScene();
+
+/* Spielt EINEN kurzen Ton auf einer zufälligen pentatonischen Tonhöhe (PENTATONIC, jetzt
+   drei Oktaven) mit zufälliger Klangfarbe (WELLENFORMEN) und leicht zufälliger Länge – das
+   sorgt für hörbare Abwechslung, ohne je dissonant zu klingen. Nutzt die Web-Audio-API
+   direkt (kein <audio>-Element, keine Sounddateien nötig – passt zur Ein-Datei-Offline-
+   Architektur). Der Gain-Verlauf (exponentialRampToValueAtTime von 0.22 auf fast 0) sorgt
+   für ein weiches Ausklingen statt eines harten Klicks. */
+function playTone() {
+  if (!soundOn || !audioCtx) return;
+  const freq = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)];
+  const wellenform = WELLENFORMEN[Math.floor(Math.random() * WELLENFORMEN.length)];
+  const dauer = 0.35 + Math.random() * 0.25; // 0.35–0.6s: mal ein kurzes "Piep", mal ein längerer Ton
+
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = wellenform;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.22, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + dauer);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t);
+  osc.stop(t + dauer + 0.05);
+
+  // Bei jedem vierten Ton (25%) zusätzlich einen leisen Oberton eine Oktave höher
+  // dazumischen – klingt wie ein kleines Glöckchen/Glitzern obendrauf, ohne den
+  // Grundton zu übertönen (deutlich leiserer Gain: 0.08 statt 0.22).
+  if (Math.random() < 0.25) {
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.value = freq * 2;
+    gain2.gain.setValueAtTime(0.08, t);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t + dauer * 0.7);
+    osc2.connect(gain2).connect(audioCtx.destination);
+    osc2.start(t);
+    osc2.stop(t + dauer * 0.7 + 0.05);
+  }
+}
+
+/* =====================================================================
+   spawnPikto(key, container, minTop, maxTop) – DER zentrale Bild-Erzeuger.
+   -------------------------------------------------------------------
+   Wird sowohl von spawnSprite() (Modus "Frei spielen") als auch von
+   spawnAdventureSprite() (Modus "Abenteuer") aufgerufen – der einzige
+   Unterschied zwischen den beiden Modi ist WOHIN das Bild eingehängt wird
+   (`container`: document.body bzw. #advSpriteLayer) und in welchem
+   vertikalen Bereich es erscheinen darf (`minTop`/`maxTop`, in Pixeln).
+   `key` ist die gedrückte Taste (e.key) oder undefined bei Klick/Touch –
+   wird nur an pickForKey() weitergereicht, um ggf. ein zum Anfangsbuchstaben
+   passendes Motiv zu bevorzugen (siehe dort).
+
+   Ablauf:
+   1. Drossel: keine zwei Bilder schneller als MIN_INTERVAL_MS hintereinander
+      (gegen Dauerfeuer bei gehaltener Taste).
+   2. Neues <div class="sprite"> anlegen, zufällige Größe/Position/Rotation/
+      Bewegungsvariante festlegen (Positionierung nur horizontal frei über
+      die volle Fensterbreite; vertikal auf [minTop, maxTop] begrenzt).
+   3. Zwei <div class="layer">-Kinder anlegen (siehe CSS-Kommentar bei
+      .sprite/.layer weiter oben): Ebene A zeigt sofort das per pickForKey()
+      gewählte Bild, Ebene B bekommt ein ANDERES zufälliges Bild aus dem
+      vollen Pool (die while-Schleife stellt sicher, dass B ≠ A ist – sonst
+      wäre die spätere "Verwandlung" unsichtbar, weil dasselbe Bild bliebe).
+   4. Mit Wahrscheinlichkeit MORPH_ANTEIL: nach einer zufälligen Verzögerung
+      (1.4–2.3s) wird Ebene A ausgeblendet und B eingeblendet → Crossfade zu
+      einem zweiten Motiv (siehe .layer.show-Transition im CSS).
+   5. Wenn die CSS-Bewegungsanimation zu Ende ist (Event "animationend",
+      ausgelöst durch die V1–V4-Keyframes im CSS), entfernt sich das Element
+      selbst aus dem DOM – kein manuelles Aufräumen von außen nötig.
+   6. Obergrenze: Enthält `container` mehr als MAX_SPRITES Sprites, wird das
+      älteste (zuerst erzeugte) sofort entfernt, bevor ein neues dazukommt.
+   7. Ton abspielen.
+   ===================================================================== */
+function spawnPikto(key, container, minTop, maxTop) {
   const now = performance.now();
   if (now - lastSpawn < MIN_INTERVAL_MS) return;
   lastSpawn = now;
@@ -365,50 +986,160 @@ function spawnSprite() {
   const el = document.createElement('div');
   el.className = 'sprite ' + VARIANTEN[Math.floor(Math.random() * VARIANTEN.length)];
 
-  const size = 90 + Math.random() * 90;
+  const size = 90 + Math.random() * 90; // 90–180px Kantenlänge
   el.style.width = size + 'px';
   el.style.height = size + 'px';
-  el.style.left = Math.random() * (window.innerWidth - size) + 'px';
-  el.style.top = Math.random() * (window.innerHeight - size - 60) + 'px';
-  el.style.setProperty('--rot', (Math.random() * 16 - 8).toFixed(1) + 'deg');
+  el.style.left = Math.random() * (window.innerWidth - size) + 'px'; // horizontal: irgendwo in voller Fensterbreite
+  // vertikal: irgendwo zwischen minTop und maxTop, aber so, dass das Bild nicht über
+  // maxTop hinausragt (deshalb wird `size` von der verfügbaren Spanne abgezogen);
+  // Math.max(0, …) fängt den Fall ab, dass die Spanne kleiner als `size` ist.
+  el.style.top = (minTop + Math.random() * Math.max(0, maxTop - minTop - size)) + 'px';
+  el.style.setProperty('--rot', (Math.random() * 16 - 8).toFixed(1) + 'deg'); // -8° bis +8°, von den CSS-Keyframes über var(--rot) gelesen
 
-  // Zwei Bildebenen: A erscheint sofort, B übernimmt beim Verwandeln
+  // Zwei Bildebenen: A erscheint sofort, B übernimmt beim Verwandeln (siehe Erklärung oben)
   const a = document.createElement('div');
   a.className = 'layer show';
-  a.innerHTML = pick();
+  a.innerHTML = pickForKey(key);
   const b = document.createElement('div');
   b.className = 'layer';
   let bBild = pick();
-  while (POOL.length > 1 && bBild === a.innerHTML) bBild = pick();
+  while (POOL.length > 1 && bBild === a.innerHTML) bBild = pick(); // B darf nicht zufällig dasselbe Bild wie A sein
   b.innerHTML = bBild;
   el.append(a, b);
 
-  document.body.appendChild(el);
+  container.appendChild(el);
 
-  // Verwandlung: A blendet aus, B blendet ein (Crossfade)
+  // Verwandlung: A blendet aus, B blendet ein (Crossfade) – nur bei einem Teil der Bilder,
+  // und erst nach kurzer Wartezeit, damit erst das erste Bild richtig "ankommt"
   if (Math.random() < MORPH_ANTEIL) {
     setTimeout(() => {
-      if (!el.isConnected) return;
+      if (!el.isConnected) return; // Sprite ist evtl. schon fertig animiert und entfernt worden
       a.classList.remove('show');
       b.classList.add('show');
     }, 1400 + Math.random() * 900);
   }
 
-  el.addEventListener('animationend', () => el.remove());
+  el.addEventListener('animationend', () => el.remove()); // räumt sich nach Ende der Bewegungsanimation selbst auf
 
-  const sprites = document.querySelectorAll('.sprite');
-  if (sprites.length > MAX_SPRITES) sprites[0].remove();
+  const sprites = container.querySelectorAll('.sprite'); // NUR im eigenen Container zählen, damit Frei- und Abenteuer-Modus sich nicht gegenseitig beeinflussen
+  if (sprites.length > MAX_SPRITES) sprites[0].remove(); // ältestes zuerst entfernen (querySelectorAll liefert Dokumentreihenfolge = Erzeugungsreihenfolge)
 
   playTone();
 }
 
-/* ===== Start ===== */
-startBtn.addEventListener('click', async () => {
-  try { await document.documentElement.requestFullscreen(); } catch (e) { /* Vollbild verweigert – läuft trotzdem */ }
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  startOverlay.style.display = 'none';
-  soundBtn.style.display = 'block';
-  running = true;
+/* Modus "Frei spielen": Bilder dürfen über die GESAMTE Fensterhöhe schweben (minTop=0),
+   nur unten 60px Sicherheitsabstand (maxTop = innerHeight - 60), damit nichts am Rand
+   abgeschnitten wird. Ziel-Container ist document.body direkt. */
+function spawnSprite(key) {
+  spawnPikto(key, document.body, 0, window.innerHeight - 60);
+}
+
+/* Modus "Abenteuer": Bilder landen in #advSpriteLayer (liegt in der Kulisse UNTER der
+   vorderen Baumreihe #advFront, siehe CSS-Erklärung dort) und dürfen fast die gesamte
+   Fensterhöhe (5–95%) einnehmen, damit möglichst viele Bilder mit den großen, bis fast
+   an den oberen Rand reichenden vorderen Pflanzen überlappen und teilweise dahinter
+   verschwinden. */
+function spawnAdventureSprite(key) {
+  spawnPikto(key, advSpriteLayer, window.innerHeight * 0.05, window.innerHeight * 0.95);
+}
+
+/* Modus "E-Mail schreiben": Bilder bleiben nebeneinander stehen statt wegzuschweben */
+/* Letzte Zeile in #emailBody (ein .emailPara oder .emailListItem), also die Zeile, in
+   die appendEmailIcon() das nächste Bild einhängen würde. null, wenn der Brief gerade
+   leer ist (frisch gestartet oder nach "Neue Nachricht"/"Absenden"). */
+function currentEmailRow() {
+  return emailBody.lastElementChild;
+}
+
+/* Neuer eingerückter Absatz (siehe .emailPara im <style>) – ausgelöst durch Enter. */
+function startEmailPara() {
+  const row = document.createElement('div');
+  row.className = 'emailPara';
+  emailBody.appendChild(row);
+  return row;
+}
+
+/* Neuer Aufzählungspunkt mit vorangestelltem "•" (siehe .emailListItem/.emailBullet
+   im <style>) – ausgelöst durch die "-"-Taste. Der Bullet ist immer das ERSTE Kind
+   der Zeile; alle danach angehängten Kinder sind Bild-Icons (wichtig für
+   removeLastEmailItem() unten, um Bullet und Icons zu unterscheiden). */
+function startEmailListItem() {
+  const row = document.createElement('div');
+  row.className = 'emailListItem';
+  const bullet = document.createElement('span');
+  bullet.className = 'emailBullet';
+  bullet.textContent = '•';
+  row.appendChild(bullet);
+  emailBody.appendChild(row);
+  return row;
+}
+
+/* Backspace: entfernt genau EIN Element. Enthält die aktuelle Zeile noch ein Bild
+   (bzw. bei einer Aufzählung: mehr als nur den Bullet), wird nur das letzte Bild
+   entfernt. Ist die Zeile bereits leer (z.B. direkt nach Enter/"-" ohne folgendes
+   Bild), wird stattdessen die ganze – leere – Zeile entfernt, damit Backspace nicht
+   "steckenbleibt", sondern Absätze/Aufzählungspunkte ebenso rückgängig machen kann. */
+function removeLastEmailItem() {
+  const row = currentEmailRow();
+  if (!row) return;
+  const istAufzaehlung = row.classList.contains('emailListItem');
+  const hatNochBilder = istAufzaehlung ? row.children.length > 1 : row.children.length > 0;
+  if (hatNochBilder) row.removeChild(row.lastElementChild);
+  else row.remove();
+}
+
+function appendEmailIcon(key) {
+  const now = performance.now();
+  if (now - lastSpawn < MIN_INTERVAL_MS) return; // gleiche Drossel wie im Frei-Modus gegen gehaltene Taste
+  lastSpawn = now;
+
+  if (key === 'Enter') {
+    startEmailPara();
+  } else if (key === 'Backspace') {
+    removeLastEmailItem();
+  } else if (key === '-') {
+    startEmailListItem();
+  } else if (key && key.length === 1) {
+    // Erstes Bild überhaupt (bzw. erstes nach Enter/"-"/Neue Nachricht): eigene Zeile
+    // gibt es noch nicht -> automatisch mit einem eingerückten Absatz beginnen, damit
+    // ein Brief nie mit einer nicht eingerückten Zeile startet.
+    const row = currentEmailRow() || startEmailPara();
+    const span = document.createElement('span');
+    span.className = 'emailIcon';
+    span.innerHTML = pickForKey(key);
+    row.appendChild(span);
+    playTone();
+  } else {
+    return; // Tab, Shift, Pfeiltasten usw. ignorieren
+  }
+  emailCard.scrollTop = emailCard.scrollHeight; // immer zum neuesten Bild scrollen
+}
+
+/* =====================================================================
+   ===== Start: Moduswahl =====
+   Jeder der drei Start-Buttons hat ein data-mode-Attribut ("frei"/"email"/
+   "abenteuer", siehe HTML) – ein einziger Klick-Handler für alle drei liest
+   dieses Attribut aus und schaltet alles Nötige frei. Vollbild- und
+   AudioContext-Erzeugung müssen HIER (innerhalb eines echten Klick-Handlers)
+   passieren, weil Browser beides aus Sicherheits-/Nervt-Gründen nur nach
+   einer echten Nutzer-Geste erlauben – von außerhalb eines Klick-Handlers
+   aufgerufen, würden beide fehlschlagen bzw. der Ton bliebe stumm.
+   ===================================================================== */
+startBtns.forEach(btn => {
+  btn.addEventListener('click', async () => {
+    mode = btn.dataset.mode;
+    try { await document.documentElement.requestFullscreen(); } catch (e) { /* Vollbild verweigert – läuft trotzdem */ }
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); // nur einmal erzeugen, auch wenn man später den Modus wechselt
+    startOverlay.style.display = 'none';
+    soundBtn.style.display = 'block';
+    menuBtn.style.display = 'block';
+    // Jede Modus-Bühne wird nur dann sichtbar geschaltet, wenn sie auch zum gewählten
+    // Modus gehört – die jeweils anderen bleiben (weiterhin) display:none.
+    emailView.style.display = mode === 'email' ? 'flex' : 'none';
+    emailToolbar.style.display = mode === 'email' ? 'flex' : 'none';
+    adventureView.style.display = mode === 'abenteuer' ? 'block' : 'none';
+    running = true;
+  });
 });
 
 soundBtn.addEventListener('click', (e) => {
@@ -417,17 +1148,77 @@ soundBtn.addEventListener('click', (e) => {
   soundBtn.textContent = soundOn ? '🔊' : '🔇';
 });
 
-/* ===== Tasten abfangen ===== */
-window.addEventListener('keydown', (e) => {
-  if (!running) return;
-  e.preventDefault(); // blockt F5, Tab, Leertaste-Scroll usw. – NICHT Windows-Taste, Strg+W, Esc im Vollbild
-  spawnSprite();
+// Zurück zur Moduswahl: blendet alle Modus-Bühnen wieder aus und zeigt das Start-Overlay.
+// advSpriteLayer.innerHTML wird geleert, weil CSS-Animationen in einem display:none-
+// Element PAUSIEREN (nicht weiterlaufen) – ohne dieses Leeren blieben bei erneutem
+// Aufruf des Abenteuer-Modus alte, halb-fertige Sprites hängen, die erst mit Verzögerung
+// zu Ende animieren. Im Frei-Modus tritt dasselbe Problem nicht auf, weil dort NICHT der
+// Container versteckt wird, sondern nur das Start-Overlay darüber gelegt wird (die
+// Sprites in document.body laufen im Hintergrund unsichtbar zu Ende und räumen sich
+// über ihr eigenes "animationend" ganz normal selbst auf).
+menuBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  running = false;
+  startOverlay.style.display = 'flex';
+  soundBtn.style.display = 'none';
+  menuBtn.style.display = 'none';
+  emailView.style.display = 'none';
+  emailToolbar.style.display = 'none';
+  adventureView.style.display = 'none';
+  advSpriteLayer.innerHTML = '';
 });
 
-/* Klick/Touch auf die Fläche erzeugt ebenfalls ein Bild (für Tablet/Maus) */
+newMailBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  emailBody.innerHTML = '';
+});
+
+// "Absenden": startet die CSS-Animation (Klasse "fly", siehe #sendAnim im <style> für
+// die volle Choreografie), zeigt danach eine kurze Bestätigung und leert die Nachricht.
+sendBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  // Klasse entfernen -> offsetWidth abfragen -> Klasse wieder hinzufügen: Der Browser
+  // merkt sich sonst, dass die Animation schon "fly" war, und würde sie bei einem
+  // zweiten Klick in Folge NICHT neu starten (CSS-Animationen reagieren nicht auf das
+  // erneute Hinzufügen einer bereits vorhandenen Klasse). Das lesende Zugreifen auf
+  // offsetWidth zwingt den Browser, das Layout sofort neu zu berechnen ("Reflow") und
+  // damit den Klassen-Entfernen-Schritt wirklich anzuwenden, BEVOR die Klasse wieder
+  // gesetzt wird – nur so erkennt er den zweiten add() als echten Neustart.
+  sendAnim.classList.remove('fly');
+  void sendAnim.offsetWidth;
+  sendAnim.classList.add('fly');
+  // 2800ms abgestimmt auf die 3s lange CSS-Animation (kurz VOR ihrem Ende, während der
+  // Flieger schon fast verschwunden ist): Bestätigung einblenden + Nachricht leeren.
+  // Wird die Animationsdauer im CSS geändert, muss dieser Wert proportional mitwandern.
+  setTimeout(() => {
+    sentBadge.classList.add('show');
+    emailBody.innerHTML = '';
+    setTimeout(() => sentBadge.classList.remove('show'), 1100);
+  }, 2800);
+});
+
+/* ===== Tasten abfangen =====
+   Ein einziger globaler keydown-Listener für alle drei Modi – verzweigt per
+   if/else auf die jeweils passende Funktion. Neuen Modus hinzufügen? Hier
+   (und im pointerdown-Listener + im startBtns-Handler oben) je einen
+   weiteren Zweig ergänzen. */
+window.addEventListener('keydown', (e) => {
+  if (!running) return; // vor dem Start bzw. im Menü passiert nichts
+  e.preventDefault(); // blockt F5, Tab, Leertaste-Scroll usw. – NICHT Windows-Taste, Strg+W, Esc im Vollbild
+  if (mode === 'email') appendEmailIcon(e.key);
+  else if (mode === 'abenteuer') spawnAdventureSprite(e.key);
+  else spawnSprite(e.key); // mode === 'frei'
+});
+
+/* Klick/Touch auf die Fläche erzeugt ebenfalls ein Bild (für Tablet/Maus). Nur in
+   Frei- und Abenteuer-Modus sinnvoll – im E-Mail-Modus sind Klicks für die Buttons
+   reserviert (Neue Nachricht/Absenden), ein Tap auf den Brief soll dort kein Zufallsbild
+   erzeugen. Ohne key-Parameter aufgerufen (kein e.key vorhanden) -> pickForKey()
+   fällt intern automatisch auf ein komplett zufälliges Bild zurück. */
 window.addEventListener('pointerdown', (e) => {
-  if (!running || e.target === soundBtn) return;
-  spawnSprite();
+  if (!running || e.target === soundBtn || e.target === menuBtn) return;
+  if (mode === 'frei') spawnSprite();
+  else if (mode === 'abenteuer') spawnAdventureSprite();
 });
 
 /* Kontextmenü unterdrücken */
